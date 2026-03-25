@@ -2,9 +2,14 @@ from flask import Flask, render_template, request, send_file, jsonify
 import nltk
 import os
 
-# Download NLTK data (for Render)
-nltk.download('stopwords')
-nltk.download('punkt')
+nltk_data_path = "/opt/render/nltk_data"
+os.makedirs(nltk_data_path, exist_ok=True)
+nltk.data.path.append(nltk_data_path)
+
+# Download ALL required resources
+nltk.download('stopwords', download_dir=nltk_data_path)
+nltk.download('punkt', download_dir=nltk_data_path)
+nltk.download('punkt_tab', download_dir=nltk_data_path)
 
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from rake_nltk import Rake
