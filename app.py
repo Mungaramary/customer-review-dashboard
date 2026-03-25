@@ -126,108 +126,122 @@ def send_email(to_email, subject, body):
 # ---------------------------
 @app.route("/", methods=["GET", "POST"])
 def index():
-    results = []
-    sentiment_counts = {"Positive": 0, "Negative": 0, "Neutral": 0, "Mixed": 0}
-    pros = []
-    cons = []
-    insight_summary = ""
+    try:
+        results = []
+        sentiment_counts = {"Positive": 0, "Negative": 0, "Neutral": 0, "Mixed": 0}
+        pros = []
+        cons = []
+        insight_summary = ""
 
-    if request.method == "POST":
+        if request.method == "POST":
 
-        file = request.files.get("file")
+            file = request.files.get("file")
 
-        # ---------------------------
-        # CSV UPLOAD HANDLING
-        # ---------------------------
-        if file and file.filename.endswith(".csv"):
-            try:
-                stream = io.StringIO(file.stream.read().decode("UTF8"))
-                df = pd.read_csv(stream)
-
-                print("📊 CSV Columns:", df.columns)
-
-                df.columns = df.columns.str.strip().str.lower()
-
-                if "review" not in df.columns:
-                    return "CSV must contain a 'review' column"
-
-                if "email" not in df.columns:
-                    df["email"] = "nimumungara@gmail.com"
-
-                reviews = df.to_dict(orient="records")
-
-            except Exception as e:
-                print("❌ CSV ERROR:", e)
-                return f"CSV Error: {str(e)}"
-
-        else:
             # ---------------------------
-            # TEXT INPUT FALLBACK
+            # CSV HANDLING
             # ---------------------------
-            reviews_text = request.form.get("reviews") or ""
-            reviews = [{"review": r, "email": "nimumungara@gmail.com"} for r in reviews_text.split("\n")]
+            if file and file.filename.endswith(".csv"):
+                try:
+                    # Handle encoding issues
+                    try:
+                        content = file.stream.read().decode("UTF8")
+                    except:
+                        content = file.stream.read().decode("latin1")
+
+                    stream = io.StringIO(content)
+                    df = pd.read_csv(stream)
+
+                    print("📊 CSV Columns:", df.columns)
+
+                    # Normalize columns
+                    df.columns = df.columns.str.strip().str.lower()
+
+                    # Auto-fix common column names
+                    df.rename(columns={
+                        "review text": "review",
+                        "reviews": "review",
+                        "email address": "email"
+                    }, inplace=True)
+
+                    if "review" not in df.columns:
+                        return f"❌ CSV must contain a 'review' column. Found: {list(df.columns)}"
+
+                    if "email" not in df.columns:
+                        df["email"] = "nimumungara@gmail.com"
+
+                    reviews = df.to_dict(orient="records")
+
+                except Exception as e:
+                    print("❌ CSV ERROR:", e)
+                    return f"CSV Error: {str(e)}"
+
+            else:
+                # TEXT INPUT
+                reviews_text = request.form.get("reviews") or ""
+                reviews = [{"review": r, "email": "nimumungara@gmail.com"} for r in reviews_text.split("\n")]
+
+            # ---------------------------
+            # PROCESS DATA
+            # ---------------------------
+            for row in reviews:
+                review = str(row.get("review", ""))
+                email_to = str(row.get("email", ""))
+
+                if not review.strip():
+                    continue
+
+                sentiment, keywords = analyze_review(review)
+                subject, email_body = generate_email(review, sentiment, keywords)
+
+                results.append({
+                    "review": review,
+                    "sentiment": sentiment,
+                    "keywords": ", ".join(keywords),
+                    "subject": subject,
+                    "email": email_body,
+                    "to": email_to
+                })
+
+                sentiment_counts[sentiment] += 1
+
+                for kw in keywords:
+                    score = analyzer.polarity_scores(kw)['compound']
+                    if score > 0:
+                        pros.append(kw)
+                    elif score < 0:
+                        cons.append(kw)
 
         # ---------------------------
-        # PROCESS REVIEWS
+        # INSIGHTS
         # ---------------------------
-        for row in reviews:
-            review = row.get("review", "")
-            email_to = row.get("email", "")
+        top_pros = Counter(pros).most_common(5)
+        top_cons = Counter(cons).most_common(5)
 
-            if not review.strip():
-                continue
+        clean_pros = [p[0] for p in top_pros if "poor" not in p[0].lower()]
+        clean_cons = [c[0] for c in top_cons]
 
-            print("➡️ Processing:", review)
-            print("📩 Recipient:", email_to)
+        if sentiment_counts["Negative"] > sentiment_counts["Positive"]:
+            insight_summary += "⚠️ Customer sentiment is mostly negative.\n"
 
-            sentiment, keywords = analyze_review(review)
-            subject, email_body = generate_email(review, sentiment, keywords)
+        if clean_cons:
+            insight_summary += "Main issues: " + ", ".join(clean_cons) + "\n"
 
-            results.append({
-                "review": review,
-                "sentiment": sentiment,
-                "keywords": ", ".join(keywords),
-                "subject": subject,
-                "email": email_body,
-                "to": email_to
-            })
+        if clean_pros:
+            insight_summary += "Customers appreciate: " + ", ".join(clean_pros) + "\n"
 
-            sentiment_counts[sentiment] += 1
+        return render_template(
+            "index.html",
+            results=results,
+            results_json=json.dumps(results),
+            sentiment_counts=sentiment_counts,
+            top_pros=top_pros,
+            top_cons=top_cons,
+            insight_summary=insight_summary
+        )
 
-            for kw in keywords:
-                score = analyzer.polarity_scores(kw)['compound']
-                if score > 0:
-                    pros.append(kw)
-                elif score < 0:
-                    cons.append(kw)
-
-    # ---------------------------
-    # INSIGHTS
-    # ---------------------------
-    top_pros = Counter(pros).most_common(5)
-    top_cons = Counter(cons).most_common(5)
-
-    clean_pros = [p[0] for p in top_pros if "poor" not in p[0].lower()]
-    clean_cons = [c[0] for c in top_cons]
-
-    if sentiment_counts["Negative"] > sentiment_counts["Positive"]:
-        insight_summary += "⚠️ Customer sentiment is mostly negative.\n"
-
-    if clean_cons:
-        insight_summary += "Main issues: " + ", ".join(clean_cons) + "\n"
-
-    if clean_pros:
-        insight_summary += "Customers appreciate: " + ", ".join(clean_pros) + "\n"
-
-    return render_template(
-        "index.html",
-        results=results,
-        results_json=json.dumps(results),
-        sentiment_counts=sentiment_counts,
-        top_pros=top_pros,
-        top_cons=top_cons,
-        insight_summary=insight_summary
-    )
+    except Exception as e:
+        print("🔥 FULL ERROR:", e)
+        return f"🔥 Internal Error: {str(e)}"
 
 # ---------------------------
 # DOWNLOAD CSV
@@ -258,8 +272,6 @@ def download():
 @app.route("/send_email", methods=["POST"])
 def send_email_route():
     data = request.json
-
-    print("📤 Sending email to:", data["to"])
 
     try:
         send_email(data["to"], data["subject"], data["body"])
