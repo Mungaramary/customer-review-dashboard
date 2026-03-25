@@ -1,4 +1,8 @@
 from flask import Flask, render_template, request, send_file, jsonify
+import nltk
+
+nltk.download('stopwords')
+nltk.download('punkt')
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from rake_nltk import Rake
 import pandas as pd
