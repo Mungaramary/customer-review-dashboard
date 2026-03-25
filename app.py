@@ -2,11 +2,13 @@ from flask import Flask, render_template, request, send_file, jsonify
 import nltk
 import os
 
+# ---------------------------
+# NLTK SETUP (FOR RENDER)
+# ---------------------------
 nltk_data_path = "/opt/render/nltk_data"
 os.makedirs(nltk_data_path, exist_ok=True)
 nltk.data.path.append(nltk_data_path)
 
-# Download ALL required resources
 nltk.download('stopwords', download_dir=nltk_data_path)
 nltk.download('punkt', download_dir=nltk_data_path)
 nltk.download('punkt_tab', download_dir=nltk_data_path)
@@ -105,26 +107,42 @@ Support Team"""
     return subject, body
 
 # ---------------------------
-# SEND EMAIL
+# SEND EMAIL (FULL FIX)
 # ---------------------------
 def send_email(to_email, subject, body):
     sender_email = os.getenv("EMAIL_USER")
     sender_password = os.getenv("EMAIL_PASS")
 
-    if not sender_email or not sender_password:
-        raise ValueError("Email environment variables not set")
+    print("📧 Sender:", sender_email)
+    print("📨 Recipient:", to_email)
 
-    if not to_email:
-        raise ValueError("Recipient email missing")
+    if not sender_email or not sender_password:
+        raise Exception("Email credentials not set")
+
+    if not to_email or "@" not in to_email:
+        raise Exception(f"Invalid recipient email: {to_email}")
+
+    if not subject:
+        subject = "Customer Feedback Response"
+
+    if not body:
+        body = "Thank you for your feedback."
 
     msg = MIMEText(body)
     msg["Subject"] = subject
     msg["From"] = sender_email
     msg["To"] = to_email
 
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(sender_email, sender_password)
-        server.send_message(msg)
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(sender_email, sender_password)
+            server.send_message(msg)
+
+        print("✅ Email sent successfully")
+
+    except Exception as e:
+        print("❌ EMAIL ERROR:", e)
+        raise Exception(str(e))
 
 # ---------------------------
 # MAIN ROUTE
@@ -139,29 +157,18 @@ def index():
         insight_summary = ""
 
         if request.method == "POST":
-
             file = request.files.get("file")
 
-            # ---------------------------
-            # CSV HANDLING
-            # ---------------------------
             if file and file.filename.endswith(".csv"):
                 try:
-                    # Handle encoding issues
                     try:
-                        content = file.stream.read().decode("UTF8")
+                        content = file.read().decode("UTF8")
                     except:
-                        content = file.stream.read().decode("latin1")
+                        content = file.read().decode("latin1")
 
-                    stream = io.StringIO(content)
-                    df = pd.read_csv(stream)
-
-                    print("📊 CSV Columns:", df.columns)
-
-                    # Normalize columns
+                    df = pd.read_csv(io.StringIO(content))
                     df.columns = df.columns.str.strip().str.lower()
 
-                    # Auto-fix common column names
                     df.rename(columns={
                         "review text": "review",
                         "reviews": "review",
@@ -169,7 +176,7 @@ def index():
                     }, inplace=True)
 
                     if "review" not in df.columns:
-                        return f"❌ CSV must contain a 'review' column. Found: {list(df.columns)}"
+                        return f"CSV must contain 'review'. Found: {list(df.columns)}"
 
                     if "email" not in df.columns:
                         df["email"] = "nimumungara@gmail.com"
@@ -177,17 +184,12 @@ def index():
                     reviews = df.to_dict(orient="records")
 
                 except Exception as e:
-                    print("❌ CSV ERROR:", e)
                     return f"CSV Error: {str(e)}"
 
             else:
-                # TEXT INPUT
-                reviews_text = request.form.get("reviews") or ""
-                reviews = [{"review": r, "email": "nimumungara@gmail.com"} for r in reviews_text.split("\n")]
+                text = request.form.get("reviews") or ""
+                reviews = [{"review": r, "email": "nimumungara@gmail.com"} for r in text.split("\n")]
 
-            # ---------------------------
-            # PROCESS DATA
-            # ---------------------------
             for row in reviews:
                 review = str(row.get("review", ""))
                 email_to = str(row.get("email", ""))
@@ -216,23 +218,8 @@ def index():
                     elif score < 0:
                         cons.append(kw)
 
-        # ---------------------------
-        # INSIGHTS
-        # ---------------------------
         top_pros = Counter(pros).most_common(5)
         top_cons = Counter(cons).most_common(5)
-
-        clean_pros = [p[0] for p in top_pros if "poor" not in p[0].lower()]
-        clean_cons = [c[0] for c in top_cons]
-
-        if sentiment_counts["Negative"] > sentiment_counts["Positive"]:
-            insight_summary += "⚠️ Customer sentiment is mostly negative.\n"
-
-        if clean_cons:
-            insight_summary += "Main issues: " + ", ".join(clean_cons) + "\n"
-
-        if clean_pros:
-            insight_summary += "Customers appreciate: " + ", ".join(clean_pros) + "\n"
 
         return render_template(
             "index.html",
@@ -245,8 +232,26 @@ def index():
         )
 
     except Exception as e:
-        print("🔥 FULL ERROR:", e)
         return f"🔥 Internal Error: {str(e)}"
+
+# ---------------------------
+# SEND EMAIL ROUTE (FIXED)
+# ---------------------------
+@app.route("/send_email", methods=["POST"])
+def send_email_route():
+    try:
+        data = request.get_json()
+
+        to_email = data.get("to")
+        subject = data.get("subject")
+        body = data.get("body")
+
+        send_email(to_email, subject, body)
+
+        return jsonify({"status": "sent"})
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
 
 # ---------------------------
 # DOWNLOAD CSV
@@ -271,22 +276,5 @@ def download():
         download_name="report.csv"
     )
 
-# ---------------------------
-# SEND EMAIL ROUTE
-# ---------------------------
-@app.route("/send_email", methods=["POST"])
-def send_email_route():
-    data = request.json
-
-    try:
-        send_email(data["to"], data["subject"], data["body"])
-        return jsonify({"status": "sent"})
-    except Exception as e:
-        print("❌ EMAIL ERROR:", e)
-        return jsonify({"status": "error", "message": str(e)})
-
-# ---------------------------
-# RUN APP
-# ---------------------------
 if __name__ == "__main__":
     app.run(debug=True)

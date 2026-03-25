@@ -98,29 +98,38 @@ function downloadCSV() {
     const url = "/download?data=" + encodeURIComponent(JSON.stringify(resultsData));
     window.location.href = url;
 }
-
+<script>
 function sendEmail(to, subject, body) {
     fetch("/send_email", {
         method: "POST",
         headers: {
             "Content-Type": "application/json"
         },
-        body: JSON.stringify({
-            to: to,
-            subject: subject,
-            body: body
-        })
+        body: JSON.stringify({ to, subject, body })
     })
-    .then(res => res.json())
-    .then(data => {
-        if (data.status === "sent") {
-            alert("✅ Email sent to " + to);
-        } else {
-            alert("❌ Error: " + data.message);
+    .then(async res => {
+        const text = await res.text();
+
+        try {
+            const data = JSON.parse(text);
+
+            if (data.status === "sent") {
+                alert("✅ Email sent!");
+            } else {
+                alert("❌ " + data.message);
+            }
+
+        } catch (e) {
+            console.error("❌ Not JSON:", text);
+            alert("Server error (check logs)");
         }
+    })
+    .catch(err => {
+        console.error(err);
+        alert("Network error");
     });
 }
-
+</script>
 // Charts
 new Chart(document.getElementById("sentimentChart"), {
     type: "bar",
