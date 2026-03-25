@@ -1,0 +1,5 @@
+Flask
+vaderSentiment
+rake-nltk
+pandas
+gunicorn
