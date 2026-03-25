@@ -1,13 +1,15 @@
 from flask import Flask, render_template, request, send_file, jsonify
 import nltk
+import os
 
+# Download NLTK data (for Render)
 nltk.download('stopwords')
 nltk.download('punkt')
+
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from rake_nltk import Rake
 import pandas as pd
 import io
-import os
 from collections import Counter
 import json
 import csv
@@ -98,13 +100,17 @@ Support Team"""
     return subject, body
 
 # ---------------------------
-# SEND EMAIL (DEBUG SAFE)
+# SEND EMAIL
+# ---------------------------
 def send_email(to_email, subject, body):
     sender_email = os.getenv("EMAIL_USER")
     sender_password = os.getenv("EMAIL_PASS")
 
     if not sender_email or not sender_password:
         raise ValueError("Email environment variables not set")
+
+    if not to_email:
+        raise ValueError("Recipient email missing")
 
     msg = MIMEText(body)
     msg["Subject"] = subject
@@ -130,23 +136,49 @@ def index():
 
         file = request.files.get("file")
 
+        # ---------------------------
+        # CSV UPLOAD HANDLING
+        # ---------------------------
         if file and file.filename.endswith(".csv"):
-            stream = io.StringIO(file.stream.read().decode("UTF8"))
-            df = pd.read_csv(stream)
-            reviews = df.to_dict(orient="records")
+            try:
+                stream = io.StringIO(file.stream.read().decode("UTF8"))
+                df = pd.read_csv(stream)
+
+                print("📊 CSV Columns:", df.columns)
+
+                df.columns = df.columns.str.strip().str.lower()
+
+                if "review" not in df.columns:
+                    return "CSV must contain a 'review' column"
+
+                if "email" not in df.columns:
+                    df["email"] = "nimumungara@gmail.com"
+
+                reviews = df.to_dict(orient="records")
+
+            except Exception as e:
+                print("❌ CSV ERROR:", e)
+                return f"CSV Error: {str(e)}"
+
         else:
-            reviews_text = request.form.get("reviews")
+            # ---------------------------
+            # TEXT INPUT FALLBACK
+            # ---------------------------
+            reviews_text = request.form.get("reviews") or ""
             reviews = [{"review": r, "email": "nimumungara@gmail.com"} for r in reviews_text.split("\n")]
 
+        # ---------------------------
+        # PROCESS REVIEWS
+        # ---------------------------
         for row in reviews:
             review = row.get("review", "")
             email_to = row.get("email", "")
 
-            print("➡️ Processing:", review)
-            print("📩 Recipient:", email_to)
-
             if not review.strip():
                 continue
+
+            print("➡️ Processing:", review)
+            print("📩 Recipient:", email_to)
 
             sentiment, keywords = analyze_review(review)
             subject, email_body = generate_email(review, sentiment, keywords)
@@ -169,6 +201,9 @@ def index():
                 elif score < 0:
                     cons.append(kw)
 
+    # ---------------------------
+    # INSIGHTS
+    # ---------------------------
     top_pros = Counter(pros).most_common(5)
     top_cons = Counter(cons).most_common(5)
 
@@ -218,7 +253,7 @@ def download():
     )
 
 # ---------------------------
-# SEND EMAIL ROUTE (DEBUG)
+# SEND EMAIL ROUTE
 # ---------------------------
 @app.route("/send_email", methods=["POST"])
 def send_email_route():
@@ -233,5 +268,8 @@ def send_email_route():
         print("❌ EMAIL ERROR:", e)
         return jsonify({"status": "error", "message": str(e)})
 
+# ---------------------------
+# RUN APP
+# ---------------------------
 if __name__ == "__main__":
     app.run(debug=True)
