@@ -1,5 +1,4 @@
 from flask import Flask, render_template, request, jsonify, send_file
-import nltk
 import os
 import io
 import json
@@ -8,29 +7,33 @@ import pandas as pd
 from collections import Counter
 import smtplib
 from email.mime.text import MIMEText
+
+# ---------------------------
+# NLTK SETUP (CRITICAL FIX)
+# ---------------------------
+import nltk
+
+nltk_data_path = "/opt/render/nltk_data"
+os.makedirs(nltk_data_path, exist_ok=True)
+nltk.data.path.append(nltk_data_path)
+
+# Download ALL required resources safely
+for pkg in ["stopwords", "punkt", "punkt_tab"]:
+    try:
+        nltk.data.find(pkg)
+    except LookupError:
+        nltk.download(pkg, download_dir=nltk_data_path)
+
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from rake_nltk import Rake
 
 app = Flask(__name__)
 
-# ---------------------------
-# NLTK FIX (FOR RENDER)
-# ---------------------------
-nltk_data_path = "/opt/render/nltk_data"
-os.makedirs(nltk_data_path, exist_ok=True)
-nltk.data.path.append(nltk_data_path)
-
-for pkg in ["stopwords", "punkt"]:
-    try:
-        nltk.data.find(pkg)
-    except:
-        nltk.download(pkg, download_dir=nltk_data_path)
-
 analyzer = SentimentIntensityAnalyzer()
 rake = Rake()
 
 # ---------------------------
-# SENTIMENT
+# SENTIMENT FUNCTION
 # ---------------------------
 def analyze_review(review):
     scores = analyzer.polarity_scores(review)
@@ -66,7 +69,7 @@ Thank you for your positive feedback regarding {kw}.
 
 "{review}"
 
-We are delighted you had a great experience.
+We are delighted you had a great experience and look forward to serving you again.
 
 Best regards,
 Support Team"""
@@ -79,7 +82,7 @@ We sincerely apologize for the issues related to {kw}.
 
 "{review}"
 
-We are actively working to improve.
+Your feedback is important and we are actively working to improve.
 
 Best regards,
 Support Team"""
@@ -90,11 +93,11 @@ Support Team"""
 
 Thank you for your honest feedback.
 
-We appreciate the positives regarding {kw} and acknowledge your concerns.
+We appreciate the positives regarding {kw}, and acknowledge the concerns raised.
 
 "{review}"
 
-We are improving the highlighted areas.
+We are working to improve the areas you highlighted.
 
 Best regards,
 Support Team"""
@@ -135,7 +138,7 @@ def send_email(to_email, subject, body):
         server.send_message(msg)
 
 # ---------------------------
-# MAIN ROUTE (SAFE DEBUG)
+# MAIN ROUTE
 # ---------------------------
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -153,18 +156,14 @@ def index():
             if not file:
                 return "❌ Please upload a CSV file"
 
-            # READ CSV SAFELY
             df = pd.read_csv(io.StringIO(file.read().decode("utf-8")))
-            print("📊 RAW COLUMNS:", df.columns)
-
             df.columns = df.columns.str.strip().str.lower()
-            print("✅ CLEAN COLUMNS:", df.columns)
 
             if "review" not in df.columns:
-                return "❌ CSV must contain a 'review' column"
+                return "❌ CSV must contain 'review' column"
 
             if "email" not in df.columns:
-                return "❌ CSV must contain an 'email' column"
+                return "❌ CSV must contain 'email' column"
 
             for _, row in df.iterrows():
                 review = str(row["review"])
@@ -194,15 +193,11 @@ def index():
                     elif score < 0:
                         cons.append(kw)
 
-        # ---------------------------
-        # CHART DATA
-        # ---------------------------
+        # Charts data
         top_pros = Counter(pros).most_common(5)
         top_cons = Counter(cons).most_common(5)
 
-        # ---------------------------
-        # INSIGHTS
-        # ---------------------------
+        # Insights
         if sentiment_counts["Negative"] > sentiment_counts["Positive"]:
             insight_summary += "⚠️ Customer sentiment is mostly negative.\n"
 
@@ -223,7 +218,6 @@ def index():
         )
 
     except Exception as e:
-        print("🔥 ERROR:", e)
         return f"🔥 Internal Error: {str(e)}"
 
 # ---------------------------
