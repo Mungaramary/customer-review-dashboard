@@ -11,14 +11,12 @@
         button { padding: 10px 20px; margin-top: 10px; background: #4CAF50; color: white; border: none; cursor: pointer; }
         .card { background: white; padding: 20px; margin-top: 20px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
         .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-        .full-width { grid-column: span 2; }
         table { width: 100%; border-collapse: collapse; }
         th, td { border: 1px solid #ddd; padding: 8px; }
         th { background: #eee; }
-        pre { white-space: pre-wrap; font-size: 12px; }
-        .insight-box { background: #eef6ff; border-left: 5px solid #4CAF50; padding: 15px; }
     </style>
 </head>
+
 <body>
 
 <h2>Customer Review Intelligence Dashboard</h2>
@@ -33,19 +31,6 @@
 </form>
 </div>
 
-{% if insight_summary %}
-<div class="card insight-box">
-    <h3>📊 Business Insights</h3>
-    <pre>{{ insight_summary }}</pre>
-</div>
-{% endif %}
-
-{% if results %}
-<div class="card">
-    <button onclick="downloadCSV()">Download Report (CSV)</button>
-</div>
-{% endif %}
-
 <div class="charts">
     <div class="card">
         <h3>Sentiment Distribution</h3>
@@ -57,7 +42,7 @@
         <canvas id="consChart"></canvas>
     </div>
 
-    <div class="card full-width">
+    <div class="card">
         <h3>Top Positive Features (Pros)</h3>
         <canvas id="prosChart"></canvas>
     </div>
@@ -71,7 +56,7 @@
             <th>Review</th>
             <th>Sentiment</th>
             <th>Keywords</th>
-            <th>Email Response</th>
+            <th>Email</th>
             <th>Send</th>
         </tr>
         {% for r in results %}
@@ -81,7 +66,7 @@
             <td>{{ r.keywords }}</td>
             <td><pre>{{ r.email }}</pre></td>
             <td>
-                <button onclick='sendEmail({{ r.to|tojson }}, {{ r.subject|tojson }}, {{ r.email|tojson }})'>
+                <button onclick="sendEmail('{{ r.to }}', `{{ r.subject|escape }}`, `{{ r.email|escape }}`)">
                     Send
                 </button>
             </td>
@@ -92,74 +77,60 @@
 {% endif %}
 
 <script>
-const resultsData = {{ results_json|safe }};
-
-function downloadCSV() {
-    const url = "/download?data=" + encodeURIComponent(JSON.stringify(resultsData));
-    window.location.href = url;
-}
-<script>
 function sendEmail(to, subject, body) {
     fetch("/send_email", {
         method: "POST",
-        headers: {
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ to, subject, body })
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({to, subject, body})
     })
-    .then(async res => {
-        const text = await res.text();
-
-        try {
-            const data = JSON.parse(text);
-
-            if (data.status === "sent") {
-                alert("✅ Email sent!");
-            } else {
-                alert("❌ " + data.message);
-            }
-
-        } catch (e) {
-            console.error("❌ Not JSON:", text);
-            alert("Server error (check logs)");
+    .then(res => res.json())
+    .then(data => {
+        if (data.status === "sent") {
+            alert("✅ Email sent!");
+        } else {
+            alert("❌ " + data.message);
         }
-    })
-    .catch(err => {
-        console.error(err);
-        alert("Network error");
     });
 }
-</script>
-// Charts
-new Chart(document.getElementById("sentimentChart"), {
-    type: "bar",
-    data: {
-        labels: ["Positive","Negative","Neutral","Mixed"],
-        datasets: [{
-            data: [
-                {{ sentiment_counts["Positive"] }},
-                {{ sentiment_counts["Negative"] }},
-                {{ sentiment_counts["Neutral"] }},
-                {{ sentiment_counts["Mixed"] }}
-            ]
-        }]
-    }
-});
 
-new Chart(document.getElementById("consChart"), {
-    type: "bar",
-    data: {
-        labels: [{% for c in top_cons %}"{{ c[0] }}",{% endfor %}],
-        datasets: [{ data: [{% for c in top_cons %}{{ c[1] }},{% endfor %}] }]
-    }
-});
+// CHARTS
+document.addEventListener("DOMContentLoaded", function () {
 
-new Chart(document.getElementById("prosChart"), {
-    type: "bar",
-    data: {
-        labels: [{% for p in top_pros %}"{{ p[0] }}",{% endfor %}],
-        datasets: [{ data: [{% for p in top_pros %}{{ p[1] }},{% endfor %}] }]
-    }
+    new Chart(document.getElementById("sentimentChart"), {
+        type: "bar",
+        data: {
+            labels: ["Positive","Negative","Neutral","Mixed"],
+            datasets: [{
+                data: [
+                    {{ sentiment_counts["Positive"] }},
+                    {{ sentiment_counts["Negative"] }},
+                    {{ sentiment_counts["Neutral"] }},
+                    {{ sentiment_counts["Mixed"] }}
+                ]
+            }]
+        }
+    });
+
+    new Chart(document.getElementById("consChart"), {
+        type: "bar",
+        data: {
+            labels: [{% for c in top_cons %}"{{ c[0] }}",{% endfor %}],
+            datasets: [{
+                data: [{% for c in top_cons %}{{ c[1] }},{% endfor %}]
+            }]
+        }
+    });
+
+    new Chart(document.getElementById("prosChart"), {
+        type: "bar",
+        data: {
+            labels: [{% for p in top_pros %}"{{ p[0] }}",{% endfor %}],
+            datasets: [{
+                data: [{% for p in top_pros %}{{ p[1] }},{% endfor %}]
+            }]
+        }
+    });
+
 });
 </script>
 
