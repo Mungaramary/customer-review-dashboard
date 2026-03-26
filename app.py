@@ -3,7 +3,7 @@ import nltk
 import os
 
 # ---------------------------
-# NLTK SETUP (RENDER SAFE)
+# NLTK FIX
 # ---------------------------
 nltk_data_path = "/opt/render/nltk_data"
 os.makedirs(nltk_data_path, exist_ok=True)
@@ -29,7 +29,7 @@ analyzer = SentimentIntensityAnalyzer()
 rake = Rake()
 
 # ---------------------------
-# SENTIMENT FUNCTION
+# SENTIMENT
 # ---------------------------
 def analyze_review(review):
     scores = analyzer.polarity_scores(review)
@@ -52,157 +52,102 @@ def analyze_review(review):
     return sentiment, keywords
 
 # ---------------------------
-# EMAIL GENERATOR
+# EMAIL GENERATION
 # ---------------------------
 def generate_email(review, sentiment, keywords):
-    keyword_text = ", ".join(keywords)
+    kw = ", ".join(keywords)
 
     if sentiment == "Positive":
-        subject = "Thank You for Your Feedback!"
-        body = f"""Dear Customer,
-
-Thank you for your positive feedback regarding {keyword_text}.
-
-"{review}"
-
-We’re glad you had a great experience.
-
-Best regards,
-Support Team"""
+        subject = "Thank You!"
+        body = f"Thanks for your feedback on {kw}.\n\n{review}"
     elif sentiment == "Negative":
-        subject = "Apology for Your Experience"
-        body = f"""Dear Customer,
-
-We sincerely apologize for the issues related to {keyword_text}.
-
-"{review}"
-
-We are working to improve this.
-
-Best regards,
-Support Team"""
+        subject = "Apology"
+        body = f"Sorry about {kw}.\n\n{review}"
     elif sentiment == "Mixed":
-        subject = "Thank You for Your Honest Feedback"
-        body = f"""Dear Customer,
-
-We appreciate your feedback regarding {keyword_text}.
-
-"{review}"
-
-We are improving the areas you highlighted.
-
-Best regards,
-Support Team"""
+        subject = "We Appreciate Your Feedback"
+        body = f"We appreciate your feedback on {kw}.\n\n{review}"
     else:
-        subject = "Thank You for Your Feedback"
-        body = f"""Dear Customer,
-
-Thank you for your feedback.
-
-"{review}"
-
-Best regards,
-Support Team"""
+        subject = "Feedback Received"
+        body = f"Thanks for your feedback.\n\n{review}"
 
     return subject, body
 
 # ---------------------------
-# SEND EMAIL
+# SEND EMAIL (SAFE)
 # ---------------------------
 def send_email(to_email, subject, body):
-    sender_email = os.getenv("EMAIL_USER")
-    sender_password = os.getenv("EMAIL_PASS")
+    sender = os.getenv("EMAIL_USER")
+    password = os.getenv("EMAIL_PASS")
 
-    if not sender_email or not sender_password:
-        raise Exception("Email credentials not set")
+    if not sender or not password:
+        raise Exception("Email credentials missing")
 
     if not to_email or "@" not in to_email:
-        raise Exception(f"Invalid recipient email: {to_email}")
+        raise Exception(f"Invalid email: {to_email}")
 
     msg = MIMEText(body)
     msg["Subject"] = subject
-    msg["From"] = sender_email
+    msg["From"] = sender
     msg["To"] = to_email
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(sender_email, sender_password)
+        server.login(sender, password)
         server.send_message(msg)
 
 # ---------------------------
-# MAIN ROUTE
+# MAIN
 # ---------------------------
 @app.route("/", methods=["GET", "POST"])
 def index():
     results = []
     sentiment_counts = {"Positive": 0, "Negative": 0, "Neutral": 0, "Mixed": 0}
-    pros = []
-    cons = []
-    insight_summary = ""
+    pros, cons = [], []
 
     if request.method == "POST":
         file = request.files.get("file")
 
-        if file and file.filename.endswith(".csv"):
-            content = file.read().decode("UTF8")
-            df = pd.read_csv(io.StringIO(content))
-
-            df.columns = df.columns.str.strip().str.lower()
-
-            if "review" not in df.columns:
-                return "CSV must contain 'review' column"
-
-            if "email" not in df.columns:
-                df["email"] = "test@gmail.com"
-
-            reviews = df.to_dict(orient="records")
-
+        if file:
+            df = pd.read_csv(io.StringIO(file.read().decode("utf-8")))
+            df.columns = df.columns.str.lower()
         else:
-            text = request.form.get("reviews") or ""
-            reviews = [{"review": r, "email": "test@gmail.com"} for r in text.split("\n")]
+            text = request.form.get("reviews", "")
+            df = pd.DataFrame({
+                "review": text.split("\n"),
+                "email": ["test@gmail.com"] * len(text.split("\n"))
+            })
 
-        for row in reviews:
+        for _, row in df.iterrows():
             review = str(row.get("review", ""))
-            email_to = str(row.get("email", ""))
+            email = str(row.get("email", ""))
 
             if not review.strip():
                 continue
 
             sentiment, keywords = analyze_review(review)
-            subject, email_body = generate_email(review, sentiment, keywords)
+            subject, body = generate_email(review, sentiment, keywords)
 
             results.append({
                 "review": review,
                 "sentiment": sentiment,
                 "keywords": ", ".join(keywords),
                 "subject": subject,
-                "email": email_body,
-                "to": email_to
+                "email": body,
+                "to": email
             })
 
             sentiment_counts[sentiment] += 1
-
-            for kw in keywords:
-                score = analyzer.polarity_scores(kw)['compound']
-                if score > 0:
-                    pros.append(kw)
-                elif score < 0:
-                    cons.append(kw)
-
-    top_pros = Counter(pros).most_common(5)
-    top_cons = Counter(cons).most_common(5)
 
     return render_template(
         "index.html",
         results=results,
         results_json=json.dumps(results),
         sentiment_counts=sentiment_counts,
-        top_pros=top_pros,
-        top_cons=top_cons,
-        insight_summary=insight_summary
+        top_pros=[],
+        top_cons=[]
     )
 
 # ---------------------------
-# SEND EMAIL ROUTE
+# SEND SINGLE EMAIL
 # ---------------------------
 @app.route("/send_email", methods=["POST"])
 def send_email_route():
@@ -212,6 +157,42 @@ def send_email_route():
         return jsonify({"status": "sent"})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)})
+
+# ---------------------------
+# SEND ALL EMAILS
+# ---------------------------
+@app.route("/send_all", methods=["POST"])
+def send_all():
+    try:
+        data = request.get_json()
+        for r in data:
+            send_email(r["to"], r["subject"], r["email"])
+        return jsonify({"status": "sent"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+# ---------------------------
+# DOWNLOAD CSV
+# ---------------------------
+@app.route("/download")
+def download():
+    data = json.loads(request.args.get("data"))
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Review", "Sentiment", "Keywords", "Email"])
+
+    for r in data:
+        writer.writerow([r["review"], r["sentiment"], r["keywords"], r["email"]])
+
+    output.seek(0)
+
+    return send_file(
+        io.BytesIO(output.getvalue().encode()),
+        mimetype="text/csv",
+        as_attachment=True,
+        download_name="report.csv"
+    )
 
 if __name__ == "__main__":
     app.run(debug=True)

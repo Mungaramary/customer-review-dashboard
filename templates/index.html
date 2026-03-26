@@ -49,6 +49,13 @@
 </div>
 
 {% if results %}
+
+<div class="card">
+    <h3>Actions</h3>
+    <button onclick="sendAll()">Send All Emails</button>
+    <button onclick="downloadCSV()">Download Report</button>
+</div>
+
 <div class="card">
     <h3>Analysis Results</h3>
     <table>
@@ -59,6 +66,7 @@
             <th>Email</th>
             <th>Send</th>
         </tr>
+
         {% for r in results %}
         <tr>
             <td>{{ r.review }}</td>
@@ -72,8 +80,10 @@
             </td>
         </tr>
         {% endfor %}
+
     </table>
 </div>
+
 {% endif %}
 
 <script>
@@ -90,7 +100,23 @@ function sendEmail(to, subject, body) {
         } else {
             alert("❌ " + data.message);
         }
-    });
+    })
+    .catch(err => alert("❌ Network error"));
+}
+
+function sendAll() {
+    fetch("/send_all", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({{ results_json|safe }})
+    })
+    .then(res => res.json())
+    .then(data => alert(data.status))
+    .catch(err => alert("❌ Failed to send all"));
+}
+
+function downloadCSV() {
+    window.location.href = "/download?data=" + encodeURIComponent(JSON.stringify({{ results_json|safe }}));
 }
 
 // CHARTS
